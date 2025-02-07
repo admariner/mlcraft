@@ -91,10 +91,10 @@ actions:
       forward_client_headers: true
     permissions:
       - role: user
-  - name: validate_datasource
+  - name: send_test_alert
     definition:
       kind: synchronous
-      handler: '{{ACTIONS_URL}}/rpc/validate_source'
+      handler: '{{ACTIONS_URL}}/rpc/send_test_alert'
       forward_client_headers: true
     permissions:
       - role: user
@@ -109,9 +109,6 @@ custom_types:
     - name: SourceTablesOutput
     - name: SourceMetaOutput
     - name: RunSourceQueryOutput
-    - name: ValidateSourceSchemaOutput
-    - name: ValidateSourceSchemasOutput
-    - name: ValidateSourceOutput
     - name: CheckConnectionOutput
     - name: FetchDatasetOutput
     - name: InviteTeamMemberOutput
@@ -121,4 +118,5 @@ custom_types:
     - name: ExportDataModelsOutput
     - name: PreAggregationsOutput
     - name: PreAggregationPreviewOutput
+    - name: SendTestAlertOutput
   scalars: []

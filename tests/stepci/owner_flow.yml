@@ -1,0 +1,702 @@
+tests:
+  owner_flow:
+    steps:
+      - name: delete_test_data
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            x-hasura-admin-secret: ${{env.HASURA_GRAPHQL_ADMIN_SECRET}}
+          graphql:
+            query: |
+              mutation delete_test_data($users_where: users_bool_exp!, $teams_where: teams_bool_exp!){
+                delete_users(where: $users_where) {
+                  affected_rows
+                }
+
+                delete_teams(where: $teams_where) {
+                  affected_rows
+                }
+              }
+            variables:
+              users_where:
+                display_name:
+                  _in: ["${{env.TEST_USER_EMAIL}}", "${{env.INVITE_USER_EMAIL}}"]
+              teams_where:
+                name:
+                  _in: ["${{env.TEST_TEAM_NAME}}"]
+          check:
+            status: 200
+            jsonpath:
+              $.data.delete_users.affected_rows:
+                - isNumber: true
+      - name: sign_up
+        http:
+          url: ${{env.HASURA_PLUS_ENDPOINT}}/auth/register
+          method: POST
+          headers:
+            Content-Type: application/json
+          body: |
+            {
+              "email": "${{env.TEST_USER_EMAIL}}",
+              "password": "pass321",
+              "cookie": false
+            }
+          captures:
+            accessToken:
+              jsonpath: $.jwt_token
+            refreshToken:
+              jsonpath: $.refresh_token
+          check:
+            status: 200
+            jsonpath:
+              $.refresh_token:
+                - isString: true
+      - name: refresh_token
+        http:
+          url: ${{env.HASURA_PLUS_ENDPOINT}}/auth/token/refresh?refresh_token=${{captures.refreshToken}}
+          method: GET
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          captures:
+            refreshToken:
+              jsonpath: $.refresh_token
+          check:
+            status: 200
+            jsonpath:
+              $.refresh_token:
+                - isString: true
+      - name: change_password
+        http:
+          url: ${{env.HASURA_PLUS_ENDPOINT}}/auth/change-password
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          body: |
+            {
+              "old_password": "pass321",
+              "new_password": "pass123"
+            }
+          check:
+            status: 204
+      - name: logout
+        http:
+          url: ${{env.HASURA_PLUS_ENDPOINT}}/auth/logout?refresh_token=${{captures.refreshToken}}
+          method: POST
+          headers:
+            Authorization: Bearer ${{captures.accessToken}}
+          check:
+            status: 204
+      - name: login
+        http:
+          url: ${{env.HASURA_PLUS_ENDPOINT}}/auth/login
+          method: POST
+          headers:
+            Content-Type: application/json
+          body: |
+            {
+              "email": "${{env.TEST_USER_EMAIL}}",
+              "password": "pass123",
+              "cookie": false
+            }
+          captures:
+            accessToken:
+              jsonpath: $.jwt_token
+            userId:
+              jsonpath: $.user.id
+            refreshToken:
+              jsonpath: $.refresh_token
+          check:
+            status: 200
+            jsonpath:
+              $.jwt_token:
+                - isString: true
+              $.user.id:
+                - isString: true
+              $.refresh_token:
+                - isString: true
+      - name: create_team
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($name: String!) {
+                create_team(name: $name) {
+                  id
+                  name
+                }
+              }
+            variables:
+              name: ${{env.TEST_TEAM_NAME}}
+          captures:
+            teamId:
+              jsonpath: $.data.create_team.id
+          check:
+            status: 200
+            jsonpath:
+              $.data.create_team.id:
+                - isString: true
+              $.data.create_team.name:
+                - isString: true
+      - name: invite_team_member
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($email: String!, $teamId: uuid) {
+                invite_team_member(email: $email, teamId: $teamId) {
+                  code
+                  message
+                  memberId
+                }
+              }
+            variables:
+              email: "invite@test.com"
+              teamId: ${{captures.teamId}}
+          check:
+            status: 200
+            jsonpath:
+              $.data.invite_team_member.memberId:
+                - isString: true
+      - name: create_datasource
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($object: datasources_insert_input!) {
+                insert_datasources_one(object: $object) {
+                  id
+                  name
+                }
+              }
+            variables:
+              object:
+                db_params:
+                  database: ${{env.DATABASE_NAME}}
+                  host: ${{env.DATABASE_HOST}}
+                  port: ${{env.DATABASE_PORT}}
+                  ssl: ${{env.DATABASE_USE_SSL}}
+                  user: ${{env.DATABASE_USER}}
+                db_type: ${{env.DATABASE_TYPE}}
+                name: ${{env.DATASOURCE_NAME}}
+                team_id: ${{captures.teamId}}
+          captures:
+            datasourceId:
+              jsonpath: $.data.insert_datasources_one.id
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_datasources_one.id:
+                - isString: true
+              $.data.insert_datasources_one.name:
+                - isString: true
+      - name: create_branch
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($object: branches_insert_input!) {
+                insert_branches_one(object: $object) {
+                  id
+                  name
+                }
+              }
+            variables:
+              object:
+                name: "main"
+                user_id: ${{captures.userId}}
+                datasource_id: ${{captures.datasourceId}}
+                status: "active"
+          captures:
+            branchId:
+              jsonpath: $.data.insert_branches_one.id
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_branches_one.id:
+                - isString: true
+      - name: check_connection
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($datasource_id: uuid!) {
+                check_connection(datasource_id: $datasource_id) {
+                  code
+                  message
+                }
+              }
+            variables:
+              datasource_id: ${{captures.datasourceId}}
+          check:
+            status: 200
+            jsonpath:
+              $.data.check_connection.code: "ok"
+      - name: fetch_tables
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              query ($id: uuid!) {
+                fetch_tables(datasource_id: $id) {
+                  schema
+                }
+              }
+            variables:
+              id: ${{captures.datasourceId}}
+          check:
+            status: 200
+            jsonpath:
+              $.[*].actors:
+                - isArray: true
+              $.[*].benchmark_results:
+                - isArray: true
+              $.[*].benchmark_runs:
+                - isArray: true
+              $.[*].cell_towers:
+                - isArray: true
+              $.[*].checks:
+                - isArray: true
+              $.[*].cisco_umbrella:
+                - isArray: true
+              $.[*].covid:
+                - isArray: true
+              $.[*].dish:
+                - isArray: true
+              $.[*].dns:
+                - isArray: true
+              $.[*].dns2:
+                - isArray: true
+              $.[*].food_facts:
+                - isArray: true
+              $.[*].github_events:
+                - isArray: true
+              $.[*].hackernews:
+                - isArray: true
+              $.[*].hackernews_changes_items:
+                - isArray: true
+              $.[*].hackernews_changes_profiles:
+                - isArray: true
+              $.[*].hackernews_changes_to_history:
+                - isArray: true
+              $.[*].hackernews_history:
+                - isArray: true
+              $.[*].hackernews_history_2:
+                - isArray: true
+              $.[*].hackernews_top:
+                - isArray: true
+              $.[*].lineorder:
+                - isArray: true
+              $.[*].loc_stats:
+                - isArray: true
+              $.[*].menu:
+                - isArray: true
+              $.[*].menu_item:
+                - isArray: true
+              $.[*].menu_item_denorm:
+                - isArray: true
+              $.[*].menu_page:
+                - isArray: true
+              $.[*].minicrawl:
+                - isArray: true
+              $.[*].ontime:
+                - isArray: true
+              $.[*].opensky:
+                - isArray: true
+              $.[*].pypi:
+                - isArray: true
+              $.[*].query_metrics_v2:
+                - isArray: true
+              $.[*].rdns:
+                - isArray: true
+              $.[*].recipes:
+                - isArray: true
+              $.[*].repos:
+                - isArray: true
+              $.[*].repos_raw:
+                - isArray: true
+              $.[*].run_attributes_v1:
+                - isArray: true
+              $.[*].stock:
+                - isArray: true
+              $.[*].tranco:
+                - isArray: true
+              $.[*].trips:
+                - isArray: true
+              $.[*].uk_price_paid:
+                - isArray: true
+              $.[*].uk_price_paid_updater:
+                - isArray: true
+              $.[*].wikistat:
+                - isArray: true
+              $.[*].workflow_jobs:
+                - isArray: true
+      - name: gen_dataschemas
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($datasource_id: uuid!, $tables: [SourceTable!]!, $branch_id: uuid!) {
+                gen_dataschemas(datasource_id: $datasource_id, tables: $tables, branch_id: $branch_id) {
+                  code
+                  message
+                }
+              }
+            variables:
+              datasource_id: ${{captures.datasourceId}}
+              tables: [{"name":"default/cell_towers"}, {"name":"default/checks"}]
+              branch_id: ${{captures.branchId}}
+          check:
+            status: 200
+            jsonpath:
+              $.data.gen_dataschemas.code: "ok"
+      - name: create_exploration
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($object: explorations_insert_input!) {
+                insert_explorations_one(object: $object) {
+                  id
+                }
+              }
+            variables:
+              object:
+                datasource_id: ${{captures.datasourceId}}
+                playground_state:
+                  page: 0
+                  limit: 2
+                  order: [
+                    {
+                    "id": "CellTowers.created",
+                    "desc": false
+                    }
+                  ]
+                  offset: 5
+                  filters:  [
+                    {
+                        "values": ["2015-01-01"],
+                        "operator": "afterDate",
+                        "dimension": "CellTowers.created"
+                    },
+                    {
+                        "values": ["2015-12-31"],
+                        "operator": "beforeDate",
+                        "dimension": "CellTowers.created"
+                    }
+                  ]
+                  measures: ["CellTowers.count"]
+                  segments: []
+                  timezone: "UTC"
+                  dimensions: ["CellTowers.lon", "CellTowers.created"]
+                  timeDimensions: []
+          captures:
+            explorationId:
+              jsonpath: $.data.insert_explorations_one.id
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_explorations_one.id:
+                - isString: true
+          wait: 2s
+      - name: fetch_dataset
+        retries:
+          count: 3
+          interval: 2s
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              query ($exploration_id: uuid!, $offset: Int, $limit: Int) {
+                fetch_dataset(exploration_id: $exploration_id, offset: offset, limit: $limit) {
+                  data
+                }
+              }
+            variables:
+              exploration_id: ${{captures.explorationId}}
+              limit: 2
+          check:
+            status: 200
+            jsonpath:
+              $.data.fetch_dataset.[1:0]:
+                CellTowers.count: "1"
+                CellTowers.created: "2015-01-01T00:02:42.000"
+                CellTowers.lon: "89.365552"
+              $.data.fetch_dataset.[0:1]:
+                CellTowers.count: "1"
+                CellTowers.created: "2015-01-01T00:01:42.000"
+                CellTowers.lon: "39.756775"
+      - name: export_data_models
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+            x-hasura-user-id: ${{captures.userId}}
+          graphql:
+            query: |
+              mutation ($branch_id: String) {
+                export_data_models(branch_id: $branch_id) {
+                  download_url
+                }
+              }
+            variables:
+              branch_id: ${{captures.branchId}}
+          check:
+            status: 200
+            jsonpath:
+              $.data.export_data_models.download_url:
+                - isString: true
+      - name: fetch_meta
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              query ($datasource_id: uuid!) {
+                fetch_meta(datasource_id: $datasource_id) {
+                  cubes
+                }
+              }
+            variables:
+              datasource_id: ${{captures.datasourceId}}
+          check:
+            status: 200
+            jsonpath:
+              $.[*].cubes[0].dimensions[0].name: "CellTowers.radio"
+              $.[*].cubes[0].measures[0].name: "CellTowers.count"
+              $.[*].cubes[0].name: "CellTowers"
+      - name: run_query
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              mutation ($datasource_id: uuid!, $query: String!, $limit: Int!) {
+                run_query(datasource_id: $datasource_id, query: $query, limit: $limit) {
+                  result
+                }
+              }
+            variables:
+              datasource_id: ${{captures.datasourceId}}
+              query: "SELECT count(check_name) FROM default.checks"
+              limit: 5
+          check:
+            status: 200
+            jsonpath:
+              $.data.run_query.result[0].count(check_name):
+                - isString: true
+      - name: create_sql_credentials
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              mutation ($object: sql_credentials_insert_input!) {
+                insert_sql_credentials_one(object: $object) {
+                  username
+                }
+              }
+            variables:
+              object:
+                user_id: ${{captures.userId}}
+                username: "user"
+                password: "pass"
+                datasource_id: ${{captures.datasourceId}}
+          captures:
+            sql_username:
+              jsonpath: $.data.insert_sql_credentials_one.username
+            sql_password:
+              jsonpath: "pass"
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_sql_credentials_one.username:
+                - isString: true
+      - name: create_alert
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              mutation ($object: alerts_insert_input!) {
+                insert_alerts_one(object: $object) {
+                  id
+                }
+              }
+            variables:
+              object:
+                exploration_id: ${{captures.explorationId}}
+                team_id: ${{captures.teamId}}
+                name: "Test Alert"
+                delivery_type: "WEBHOOK"
+                delivery_config:
+                  url: "https://testwebhook.com"
+                trigger_config:
+                  measures:
+                    CellTowers:count:
+                      lowerBound: 0
+                      upperBound: 100
+                schedule: "* * * * *"
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_alerts_one.id:
+                - isString: true
+      - name: create_report
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              mutation ($object: reports_insert_input!) {
+                insert_reports_one(object: $object) {
+                  id
+                }
+              }
+            variables:
+              object:
+                exploration_id: ${{captures.explorationId}}
+                team_id: ${{captures.teamId}}
+                name: "Test Report"
+                delivery_type: "WEBHOOK"
+                delivery_config:
+                  url: "https://testwebhook.com"
+                schedule: "* * * * *"
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_reports_one.id:
+                - isString: true
+      - name: generate_sql
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              mutation ($exploration_id: uuid!) {
+                gen_sql(exploration_id: $exploration_id) {
+                  result
+                }
+              }
+            variables:
+              exploration_id: ${{captures.explorationId}}
+          check:
+            status: 200
+            jsonpath:
+              $.data.gen_sql.result.sql: "SELECT\n      `cell_towers`.lon `cell_towers__lon`, `cell_towers`.created `cell_towers__created`, count(*) `cell_towers__count`\n    FROM\n      default.cell_towers AS `cell_towers`  WHERE (`cell_towers`.created > parseDateTimeBestEffort('2015-01-01T00:00:00.000Z')) AND (`cell_towers`.created < parseDateTimeBestEffort('2015-12-31T00:00:00.000Z')) GROUP BY `cell_towers__lon`, `cell_towers__created` ORDER BY `cell_towers__created` ASC LIMIT 2 OFFSET 5"
+      - name: create_version
+        http:
+          url: ${{env.HASURA_ENDPOINT}}
+          method: POST
+          headers:
+            Content-Type: application/json
+            Authorization: Bearer ${{captures.accessToken}}
+          graphql:
+            query: |
+              mutation ($object: versions_insert_input!) {
+                insert_versions_one(object: $object) {
+                  id
+                }
+              }
+            variables:
+              object:
+                checksum: "46f0c126790289d004d5c6dd82734cef"
+                user_id: ${{captures.userId}}
+                branch_id: ${{captures.branchId}}
+                dataschemas:
+                  data:
+                    name: "Checks.yml"
+                    code: "cubes:\n  - name: Checks\n    sql: SELECT * FROM default.checks\n    joins: []\n\n    dimensions:\n      - name: commitSha\n        sql: commit_sha\n        type: string\n\n    measures:\n      - name: count\n        type: count"
+                    user_id: ${{captures.userId}}
+                    datasource_id: ${{captures.datasourceId}}
+          captures:
+            versionId:
+              jsonpath: $.data.insert_versions_one.id
+          check:
+            status: 200
+            jsonpath:
+              $.data.insert_versions_one.id:
+                - isString: true
+      - name: generate_docs
+        http:
+          url: ${{env.ACTIONS_URL}}/rpc/gen_schemas_docs
+          method: POST
+          headers:
+            Content-Type: application/json
+          json:
+            event:
+              data:
+                new:
+                  id: ${{captures.versionId}}
+          check:
+            jsonpath:
+              $:
+                error: false
+                markdownDoc: "#  Documentation\n\nThis documentation covers version ${{captures.versionId}} from branch \"main\".\n\n---\n####  List of cubes:\n\n<details open>\n<summary>Checks</summary>\n\n#### &nbsp;&nbsp;&nbsp;&nbsp; Measures\n\n##### &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Count\n\n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; No description provided\n\n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **Parameters:**\n\n- &nbsp;&nbsp; **Name**: `Checks.count`\n- &nbsp;&nbsp; **Title**: `Checks Count`\n- &nbsp;&nbsp; **Type**: `number`\n- &nbsp;&nbsp; **Aggregation Type**: `count`\n- &nbsp;&nbsp; **Drill Members**: ``\n\n\n#### &nbsp;&nbsp;&nbsp;&nbsp; Dimensions\n\n##### &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Commit Sha\n\n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; No description provided\n\n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **Parameters:**\n\n- &nbsp;&nbsp; **Name**: `Checks.commitSha`\n- &nbsp;&nbsp; **Title**: `Checks Commit Sha`\n- &nbsp;&nbsp; **Type**: `string`\n\n\n</details>\n\n---\n####  Version author: test@test.com\n\n"

@@ -33,6 +33,7 @@ type Query {
 type Query {
   fetch_meta(
     datasource_id: uuid!
+    branch_id: uuid
   ): SourceMetaOutput
 }
 
@@ -63,6 +64,7 @@ type Mutation {
     email: String!
     teamId: uuid
     role: String
+    magicLink: Boolean
   ): InviteTeamMemberOutput
 }
 
@@ -83,19 +85,24 @@ type Query {
 type Mutation {
   run_query(
     datasource_id: uuid!
+    branch_id: uuid
     query: String!
     limit: Int!
   ): RunSourceQueryOutput
 }
 
 type Mutation {
-  validate_datasource(
-    id: uuid!
-  ): ValidateSourceOutput
+  send_test_alert(
+    name: String
+    deliveryType: String!
+    deliveryConfig: json!
+    explorationId: uuid
+  ): SendTestAlertOutput
 }
 
 input SourceTable {
   name: String!
+  schema: String!
 }
 
 input events_create_input {
@@ -125,21 +132,6 @@ type SourceMetaOutput {
 
 type RunSourceQueryOutput {
   result: json
-}
-
-type ValidateSourceSchemaOutput {
-  code: String!
-  message: String
-}
-
-type ValidateSourceSchemasOutput {
-  code: String!
-  message: String
-}
-
-type ValidateSourceOutput {
-  code: String!
-  message: String
 }
 
 type CheckConnectionOutput {
@@ -189,5 +181,10 @@ type PreAggregationsOutput {
 
 type PreAggregationPreviewOutput {
   data: json!
+}
+
+type SendTestAlertOutput {
+  error: Boolean
+  result: json
 }
 

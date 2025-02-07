@@ -1,14 +1,16 @@
 import {
-  S3Client,
-  PutObjectCommand,
   CreateBucketCommand,
-  ListBucketsCommand,
   GetObjectCommand,
-} from '@aws-sdk/client-s3';
+  ListBucketsCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@aws-sdk/node-http-handler";
+import * as https from "https";
 
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-import logger from './logger';
+import logger from "./logger.js";
 
 const {
   AWS_S3_ENDPOINT,
@@ -16,13 +18,13 @@ const {
   AWS_S3_SECRET_ACCESS_KEY,
   AWS_S3_REGION,
   MINIO_DEV_PROXY,
-  NODE_ENV,
+  AWS_S3_PRESIGNED_URL_EXPIRES_IN: AWS_S3_PRESIGNED_URL_EXPIRES_IN_RAW,
+  AWS_S3_REJECT_UNAUTHORIZED,
 } = process.env;
 
-const dev = NODE_ENV !== 'production';
-
 // 7 days
-const AWS_S3_PRESIGNED_URL_EXPIRES_IN = 7 * 24 * 60 * 60;
+const AWS_S3_PRESIGNED_URL_EXPIRES_IN =
+  AWS_S3_PRESIGNED_URL_EXPIRES_IN_RAW || 7 * 24 * 60 * 60;
 
 const s3ClientConfig = {
   forcePathStyle: true,
@@ -31,6 +33,14 @@ const s3ClientConfig = {
     accessKeyId: AWS_S3_ACCESS_KEY_ID,
     secretAccessKey: AWS_S3_SECRET_ACCESS_KEY,
   },
+  requestHandler: new NodeHttpHandler({
+    httpsAgent: new https.Agent({
+      rejectUnauthorized:
+        AWS_S3_REJECT_UNAUTHORIZED !== undefined
+          ? AWS_S3_REJECT_UNAUTHORIZED
+          : true,
+    }),
+  }),
 };
 
 if (AWS_S3_ENDPOINT) {
@@ -44,10 +54,12 @@ export const findOrCreateBucket = async (bucketName) => {
     const listBucketsResult = await s3Client.send(new ListBucketsCommand({}));
     const buckets = listBucketsResult?.Buckets ?? [];
 
-    const bucket = buckets.find(bucket => bucket.Name === bucketName);
+    const bucket = buckets.find((bucket) => bucket.Name === bucketName);
 
     if (!bucket) {
-      const createBucketResult = await s3Client.send(new CreateBucketCommand({ Bucket: bucketName }));
+      const createBucketResult = await s3Client.send(
+        new CreateBucketCommand({ Bucket: bucketName })
+      );
 
       if (!createBucketResult?.Location) {
         throw new Error(`${bucketName} hasn't been created`);
@@ -56,7 +68,7 @@ export const findOrCreateBucket = async (bucketName) => {
 
     return {};
   } catch (error) {
-    logger.error(`An error occured while working with the bucket: ${error}`);
+    logger.error(`An error occurred while working with the bucket: ${error}`);
 
     return { error };
   }
@@ -69,17 +81,25 @@ export const getPresignedDowloadUrl = async ({ bucketName, filePath }) => {
   });
 
   try {
-    const url = await getSignedUrl(s3Client, command, { expiresIn: AWS_S3_PRESIGNED_URL_EXPIRES_IN });
+    const url = await getSignedUrl(s3Client, command, {
+      expiresIn: AWS_S3_PRESIGNED_URL_EXPIRES_IN,
+    });
 
     return { url };
   } catch (error) {
-    logger.error(`An error occured while signing URL to the file: ${error}`);
+    logger.error(`An error occurred while signing URL to the file: ${error}`);
 
     return { error };
   }
 };
 
-export const putFileToBucket = async ({ bucketName, fileBody, filePath, fileContentType, fileContentLength }) => {
+export const putFileToBucket = async ({
+  bucketName,
+  fileBody,
+  filePath,
+  fileContentType,
+  fileContentLength,
+}) => {
   const { error } = await findOrCreateBucket(bucketName);
 
   if (error) {
@@ -97,19 +117,22 @@ export const putFileToBucket = async ({ bucketName, fileBody, filePath, fileCont
       })
     );
   } catch (error) {
-    logger.error(`An error occured while working with the file: ${error}`);
+    logger.error(`An error occurred while working with the file: ${error}`);
 
     return { error };
   }
 
-  const { url, error: presignError } = await getPresignedDowloadUrl({ bucketName, filePath });
+  const { url, error: presignError } = await getPresignedDowloadUrl({
+    bucketName,
+    filePath,
+  });
 
   if (presignError) {
     return { error: presignError };
   }
 
   let resultUrl = url;
-  if (dev) {
+  if (MINIO_DEV_PROXY) {
     resultUrl = resultUrl.replace(AWS_S3_ENDPOINT, MINIO_DEV_PROXY);
   }
 

@@ -1,6 +1,10 @@
-export HASURA_GRAPHQL_ADMIN_SECRET=devsecret
+export HASURA_GRAPHQL_ADMIN_SECRET=${HASURA_GRAPHQL_ADMIN_SECRET:-"devsecret"}
 
-./create-network.sh
+./cli.sh compose up --init --build
 
-python3 cli.py services up
+./cli.sh hasura cli "migrate apply --database-name default --version 1628429118205" --build
+
+# wait until hasura auth is ready
+sleep 5
+
 ./migrate.sh
